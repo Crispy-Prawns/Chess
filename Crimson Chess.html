@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crimson Chess</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Nunito:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#120a22;--panel:#241540;--gold:#e8c46a;--lav:#cdb8ff;--lt:#c9b6ee;--dk:#5a3a8f;--hl:rgba(232,196,106,.5);--red:#e0446a;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:radial-gradient(ellipse at 50% 0,#3a1f6b,var(--bg) 70%) fixed;color:var(--lav);font-family:Nunito,system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;gap:12px;padding:14px 10px 28px;overflow-x:hidden}
+h1{font-family:'Cinzel Decorative',Georgia,serif;color:var(--gold);margin:4px 0 0;font-size:clamp(22px,6vw,34px);text-shadow:0 0 14px rgba(232,196,106,.5);text-align:center}
+#st{min-height:24px;font-weight:800;text-align:center;font-size:17px}
+#bw{width:min(94vw,520px);padding:8px;border:2px solid var(--gold);border-radius:12px;background:var(--panel);box-shadow:0 0 30px rgba(140,80,255,.35);position:relative;z-index:1}
+#bd{display:grid;grid-template-columns:repeat(8,1fr);aspect-ratio:1;border-radius:6px;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.sq{position:relative;display:flex;align-items:center;justify-content:center;font-size:min(9.4vw,48px);cursor:pointer;line-height:1}
+.l{background:var(--lt)}.d{background:var(--dk)}
+.sq.last{background-image:linear-gradient(var(--hl),var(--hl))}
+.sq.chk{background-image:radial-gradient(circle,var(--red),transparent 75%)}
+.sq.sel{box-shadow:inset 0 0 0 4px var(--gold)}
+.sq.mv::after{content:"";position:absolute;width:28%;height:28%;border-radius:50%;background:rgba(232,196,106,.9);box-shadow:0 0 8px var(--gold)}
+.sq.mv.cap::after{width:90%;height:90%;background:none;border:4px solid rgba(224,68,106,.9);box-shadow:none}
+.pw{color:#fff6d6;text-shadow:0 0 2px #2a1450,0 1px 3px #2a1450,0 0 10px rgba(232,196,106,.6)}
+.pb{color:#1a0d33;text-shadow:0 0 6px rgba(205,184,255,.7)}
+.pop{animation:pop .28s}
+@keyframes pop{0%{transform:scale(1.4)}100%{transform:scale(1)}}
+.co{position:absolute;font-size:10px;font-weight:800;opacity:.75;color:var(--gold);font-style:normal;pointer-events:none}
+#bar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;position:relative;z-index:1}
+button,select{font:800 15px Nunito,sans-serif;padding:10px 14px;border-radius:10px;border:1px solid var(--gold);background:var(--panel);color:var(--gold);cursor:pointer}
+button:active{background:var(--dk)}
+.fl{position:fixed;top:-10vh;color:var(--gold);opacity:.22;pointer-events:none;animation:fl linear infinite}
+@keyframes fl{to{transform:translateY(120vh) rotate(180deg)}}
+small{opacity:.7;text-align:center;position:relative;z-index:1}
+</style>
+</head>
+<body>
+<h1>✦ Crimson Chess ✦</h1>
+<div id="st">Loading…</div>
+<div id="bw"><div id="bd"></div></div>
+<div id="bar">
+  <select id="side"><option value="w">Play White</option><option value="b">Play Black</option></select>
+  <select id="lvl"><option value="1">Apprentice</option><option value="2" selected>Mage</option><option value="3">Archmage</option></select>
+  <button id="undo">↶ Undo</button>
+  <button id="flip">⇅ Flip</button>
+  <button id="new">✧ New game</button>
+</div>
+<small>Tap a piece, then a glowing square. Pawns auto-promote to queens.</small>
+
+<script>
+const FILES="abcdefgh",GL={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"},V={p:100,n:320,b:330,r:500,q:900,k:0};
+const $=id=>document.getElementById(id);
+const white=ch=>ch===ch.toUpperCase(), colorOf=ch=>ch?(white(ch)?'w':'b'):'';
+let S,hist=[],me='w',flip=false,sel=-1,legalSel=[],last=null,busy=false,over=false;
+
+const fresh=()=>({b:[..."rnbqkbnr"+"pppppppp"+" ".repeat(32)+"PPPPPPPP"+"RNBQKBNR"].map(x=>x===' '?'':x),t:'w',c:'KQkq',ep:-1});
+const ORTH=[[1,0],[-1,0],[0,1],[0,-1]],DIAG=[[1,1],[1,-1],[-1,1],[-1,-1]],KN=[[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]];
+
+function atk(b,sq,by){
+  const r=sq>>3,c=sq&7,u=by==='w',P=x=>u?x.toUpperCase():x;
+  const at=(rr,cc)=>rr>=0&&rr<8&&cc>=0&&cc<8?b[rr*8+cc]:'';
+  for(const dc of[-1,1])if(at(r+(u?1:-1),c+dc)===P('p'))return true;
+  for(const[a,d]of KN)if(at(r+a,c+d)===P('n'))return true;
+  for(const[a,d]of[...ORTH,...DIAG])if(at(r+a,c+d)===P('k'))return true;
+  for(const[a,d]of[...ORTH,...DIAG]){
+    const dg=a&&d;let rr=r+a,cc=c+d;
+    while(rr>=0&&rr<8&&cc>=0&&cc<8){const x=b[rr*8+cc];if(x){if(x===P('q')||x===P(dg?'b':'r'))return true;break}rr+=a;cc+=d}
+  }
+  return false;
+}
+
+function gen(s){
+  const{b,t}=s,u=t==='w',o=u?'b':'w',out=[];
+  const add=(f,to,x)=>out.push({f,t:to,...x});
+  for(let f=0;f<64;f++){
+    const ch=b[f];if(!ch||colorOf(ch)!==t)continue;
+    const k=ch.toLowerCase(),r=f>>3,c=f&7;
+    if(k==='p'){
+      const d=u?-1:1,r1=r+d;if(r1<0||r1>7)continue;
+      const pr=(r1===0||r1===7)?{p:1}:{};
+      if(!b[r1*8+c]){add(f,r1*8+c,pr);if(r===(u?6:1)&&!b[(r+2*d)*8+c])add(f,(r+2*d)*8+c)}
+      for(const dc of[-1,1]){const cc=c+dc;if(cc<0||cc>7)continue;const to=r1*8+cc,x=b[to];
+        if((x&&colorOf(x)===o)||to===s.ep)add(f,to,pr)}
+    }else if(k==='n'||k==='k'){
+      for(const[a,d]of(k==='n'?KN:[...ORTH,...DIAG])){
+        const rr=r+a,cc=c+d;if(rr<0||rr>7||cc<0||cc>7)continue;
+        const x=b[rr*8+cc];if(!x||colorOf(x)===o)add(f,rr*8+cc)}
+    }else{
+      for(const[a,d]of(k==='b'?DIAG:k==='r'?ORTH:[...ORTH,...DIAG])){
+        let rr=r+a,cc=c+d;
+        while(rr>=0&&rr<8&&cc>=0&&cc<8){const x=b[rr*8+cc];
+          if(!x)add(f,rr*8+cc);else{if(colorOf(x)===o)add(f,rr*8+cc);break}
+          rr+=a;cc+=d}
+      }
+    }
+  }
+  const ks=(u?7:0)*8+4,K=u?'K':'k',Q=u?'Q':'q',R=u?'R':'r';
+  if(b[ks]===K&&!atk(b,ks,o)){
+    if(s.c.includes(K)&&!b[ks+1]&&!b[ks+2]&&b[ks+3]===R&&!atk(b,ks+1,o)&&!atk(b,ks+2,o))add(ks,ks+2,{cas:1});
+    if(s.c.includes(Q)&&!b[ks-1]&&!b[ks-2]&&!b[ks-3]&&b[ks-4]===R&&!atk(b,ks-1,o)&&!atk(b,ks-2,o))add(ks,ks-2,{cas:1});
+  }
+  return out;
+}
+
+function app(s,m){
+  const b=s.b.slice(),ch=b[m.f],u=s.t==='w',k=ch.toLowerCase();
+  if(k==='p'&&m.t===s.ep)b[m.t+(u?8:-8)]='';
+  b[m.t]=m.p?(u?'Q':'q'):ch;b[m.f]='';
+  if(m.cas){if(m.t>m.f){b[m.f+1]=b[m.f+3];b[m.f+3]=''}else{b[m.f-1]=b[m.f-4];b[m.f-4]=''}}
+  let c=s.c;const R={60:'KQ',63:'K',56:'Q',4:'kq',7:'k',0:'q'};
+  for(const q of[m.f,m.t])if(R[q])for(const x of R[q])c=c.replace(x,'');
+  return{b,t:u?'b':'w',c,ep:k==='p'&&Math.abs(m.t-m.f)===16?(m.f+m.t)/2:-1};
+}
+
+const kingSq=(s,t)=>s.b.indexOf(t==='w'?'K':'k');
+const inChk=s=>atk(s.b,kingSq(s,s.t),s.t==='w'?'b':'w');
+const legal=s=>{const o=s.t==='w'?'b':'w';return gen(s).filter(m=>!atk(app(s,m).b,kingSq(s,s.t),o))};
+
+function ev(s){
+  let v=0;
+  for(let i=0;i<64;i++){
+    const ch=s.b[i];if(!ch)continue;
+    const k=ch.toLowerCase(),u=white(ch),r=i>>3,c=i&7,cd=Math.abs(3.5-r)+Math.abs(3.5-c);
+    let x=V[k];
+    if(k==='n'||k==='b'||k==='q')x+=(7-cd)*6;
+    else if(k==='p')x+=(u?6-r:r-1)*8+(7-cd)*2;
+    v+=u?x:-x;
+  }
+  return v;
+}
+const byCap=s=>(x,y)=>(s.b[y.t]?1:0)-(s.b[x.t]?1:0);
+function nm(s,d,a,bb,ply){
+  const ms=legal(s);
+  if(!ms.length)return inChk(s)?-99000+ply:0;
+  if(d===0)return(s.t==='w'?1:-1)*ev(s);
+  ms.sort(byCap(s));
+  for(const m of ms){const v=-nm(app(s,m),d-1,-bb,-a,ply+1);if(v>=bb)return bb;if(v>a)a=v}
+  return a;
+}
+function pick(s,d){
+  const ms=legal(s);ms.sort(byCap(s));
+  let best=ms[0],bv=-1e9;
+  for(const m of ms){
+    const v=-nm(app(s,m),d-1,-1e9,1e9,1)+Math.random()*(d===1?70:5);
+    if(v>bv){bv=v;best=m}
+  }
+  return best;
+}
+
+function render(pop){
+  const bd=$('bd');bd.innerHTML='';
+  const ck=inChk(S)?kingSq(S,S.t):-1;
+  for(let i=0;i<64;i++){
+    const sq=flip?63-i:i,r=sq>>3,c=sq&7,ch=S.b[sq],d=document.createElement('div');
+    d.className='sq '+((r+c)%2?'d':'l')+(sq===sel?' sel':'')+(last&&(sq===last.f||sq===last.t)?' last':'')+(sq===ck?' chk':'')+(legalSel.some(x=>x.t===sq)?' mv'+(ch?' cap':''):'');
+    d.dataset.sq=sq;
+    if(ch){const s=document.createElement('span');s.textContent=GL[ch.toLowerCase()]+'\uFE0E';s.className=(white(ch)?'pw':'pb')+(sq===pop?' pop':'');d.appendChild(s)}
+    if(i%8===0){const e=document.createElement('i');e.className='co';e.style.cssText='left:3px;top:2px';e.textContent=8-r;d.appendChild(e)}
+    if(i>=56){const e=document.createElement('i');e.className='co';e.style.cssText='right:3px;bottom:2px';e.textContent=FILES[c];d.appendChild(e)}
+    bd.appendChild(d);
+  }
+}
+
+function status(){
+  if(over)return;
+  const chk=inChk(S);
+  $('st').textContent=(S.t===me?'Your move ♟':'The oracle is thinking ✧')+(chk?' — Check!':'');
+}
+function finish(){
+  if(legal(S).length)return false;
+  over=true;
+  $('st').textContent=inChk(S)?(S.t===me?'Checkmate — the crimson moon claims you ☾':'Checkmate — you win! ✦'):'Stalemate — a draw ⋆';
+  return true;
+}
+function play(m){
+  hist.push({S,last});S=app(S,m);last=m;sel=-1;legalSel=[];
+  render(m.t);
+  if(!finish()){status();if(S.t!==me)aiMove()}
+}
+function aiMove(){
+  busy=true;status();
+  setTimeout(()=>{busy=false;if(over)return;play(pick(S,+$('lvl').value))},80);
+}
+function onSq(sq){
+  if(busy||over||S.t!==me)return;
+  const ch=S.b[sq];
+  if(ch&&colorOf(ch)===me){sel=sq;legalSel=legal(S).filter(m=>m.f===sq);render();return}
+  const m=legalSel.find(x=>x.t===sq);
+  if(m)return play(m);
+  sel=-1;legalSel=[];render();
+}
+function newGame(){
+  me=$('side').value;S=fresh();hist=[];last=null;sel=-1;legalSel=[];over=false;busy=false;flip=me==='b';
+  render();status();if(S.t!==me)aiMove();
+}
+$('bd').addEventListener('click',e=>{const d=e.target.closest('.sq');if(d)onSq(+d.dataset.sq)});
+$('new').onclick=newGame;
+$('side').onchange=newGame;
+$('flip').onclick=()=>{flip=!flip;render()};
+$('undo').onclick=()=>{
+  if(busy||!hist.length)return;
+  do{const h=hist.pop();S=h.S;last=h.last}while(hist.length&&S.t!==me);
+  over=false;sel=-1;legalSel=[];render();status();if(S.t!==me)aiMove();
+};
+for(let i=0;i<16;i++){
+  const s=document.createElement('span');s.className='fl';s.textContent="✦⭒˚✧♡⋆"[i%6];
+  s.style.cssText=`left:${Math.random()*100}vw;font-size:${12+Math.random()*18}px;animation-duration:${10+Math.random()*14}s;animation-delay:-${Math.random()*20}s`;
+  document.body.appendChild(s);
+}
+newGame();
+</script>
+</body>
+</html>
